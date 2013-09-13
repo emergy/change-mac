@@ -1,0 +1,61 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+my ($iface, $value) = @ARGV;
+my ($ifconfig, $interface);
+
+# Read network interfaces
+open CMD, "/sbin/ifconfig |" or die "Can't open ifconfig process\n";
+while (<CMD>){
+    $interface = $1 if /(^\w+)/;
+    $ifconfig->{$interface}->{mac} = $1 if /ether\s+((?:[\da-f]{2}:){5}[\da-f]{2})/;
+    $ifconfig->{$interface}->{ip} = $1 if /inet\s+((?:\d{1,3}\.){3}\d{1,3})/;
+}
+close CMD;
+
+unless ($iface) {
+    # Show interfaces
+    foreach (keys %$ifconfig) {
+        if ($ifconfig->{$_}->{mac}) {
+            $ifconfig->{$_}->{ip} = "\t" unless $ifconfig->{$_}->{ip};
+            print "$_:\t$ifconfig->{$_}->{ip}\t$ifconfig->{$_}->{mac}\n";
+        }
+    }
+} else {
+    print "Current MAC:\t$ifconfig->{$iface}->{mac}\n";
+    unless ($value) {
+        # Generate new MAC address
+        $value = newmac($ifconfig->{$iface}->{mac});
+    }
+    print "New MAC:\t" . newmac($ifconfig->{$iface}->{mac}) . "\n";
+
+    # Disconnect wireless interface
+    if ($iface eq 'en1') {
+        system("sudo /System/Library/PrivateFrameworks/Apple80211.framework/Resources/airport -z");
+        sleep 1;
+    }
+
+    # Set new mac address
+    system("sudo /sbin/ifconfig $iface ether $value");
+}
+
+sub newmac {
+    my ($mac) = @_;
+    if ($mac =~ /^(.*)(..)$/) {
+        my $nm;
+
+        if ($2 eq 'ff') {
+            $nm = 00;
+        } else {
+            $nm = $1 . sprintf("%02x",hex($2) + 1); 
+        }
+
+        foreach (keys %$ifconfig) {
+            newmac($nm) if $ifconfig->{$_}->{mac} and $nm eq $ifconfig->{$_}->{mac};
+        }
+
+        return $nm;
+    }
+}
